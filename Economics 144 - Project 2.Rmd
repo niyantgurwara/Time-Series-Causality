@@ -1,0 +1,435 @@
+---
+title: "Economics 144 - Project 2"
+author: "Ian Chisholm & Niyant Gurwara"
+date: "5/31/2017"
+output: 
+  pdf_document:
+  toc: true
+  toc_depth: 2
+---
+
+# I: Introduction
+
+For an earlier project, we examined temperatures in Southern California. Stemming frm the ecouragn results of that project, we wanted to continue our researching and working with  meteorological data. There were two reasons for this. Firstly, the data is abundantly available, reaching back more than a century. Second, We wanted to identify environmental trends prevalent today. Considering that climate change is one of the fundamental problems of our generation, we wanted to focus on some aspect of this global process. Our goal was to statistically prove the existence of a physical process that represents climate change.To this effect, we chose to analyze sea levels in relation to rising global temperatures.
+ 
+Possibly the most simplified explanation for global warming is as follows: accumulation of greenhouse gases is depleting the ozone layer and thereby leading to an increase in mean temperatures around the world. Rising temperatures are melting the polar ice caps, thereby leading to a rise global mean sea levels. We wanted to prove this relationship between greenhouse gases and sea levels through statistical analysis. Our first idea was to use some measure of mean global sea levels as our dependent variable and Carbon Dioxide (CO2) levels as our independent variable in a Variable Autoregressive (VAR) Model.
+ 
+However, upon running some primary diagnostics, our data did not suggest causality between the carbon dioxide and sea leves. After further research, we concluded that this is because radiative forcing, a process that measures the change in energy balance due to greenhouse gases, is significantly delayed. It would be difficult to prove cuasality between the two variabes without thoroughly examining each of the links in between. In order to more accurately predict a relationship, we shifted our attention to another process instead. We decided to model mean sea level as a function of the average temperature in Northwestern California (the dataset we analyzed in project 1). We expected that temperatures and sea levels should be positively correlated, with temperatures causing sea levels to rise. 
+ 
+Our data consists of monthly observations for both the time series chosen. Sea level is measured by height in feet. Temperature is measured in Fahrenheit. Observations for both series begin in 1959 and run through 2016. The data was acquired from the National Oceanic and Atmospheric Administration (see references).
+
+The source code for each sub-part of a topic can be found under the corresponding title and serial number in Part V of this report.
+
+# II: Results
+
+```{r, include=F}
+library(timeSeries)
+library(vars)
+library(forecast)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(car)
+library(gridExtra)
+
+
+
+rm(list=ls())
+
+setwd('/Users/NiyantG/Desktop/College/Senior/Spring/Econ 144/Project 2')
+
+df <- read.csv('/Users/NiyantG/Desktop/College/Senior/Spring/Econ 144/Project 2/temp_co2_sl.csv')
+var.df <- data.frame(temp=df$temp,sl=df$sl) # dataframe for VAR analysis
+
+sl <- ts(df$sl,1959,2017,frequency = 12)
+co2 <- ts(df$co2,1959,2017,frequency=12)
+tmp <- ts(df$temp,1959,2017,frequency=12)
+t <- ts(df$date,1959,2017,frequency=12)
+
+```
+
+## Trend, Seasonality and Cycles
+### (a) Time Series Plots
+
+```{r, fig.height=9, echo=FALSE}
+par(mfrow=c(3,1))
+plot(sl,col='seagreen',type='l', main='Mean Sea Level', ylab='Sea Level (ft)', xlab='Time')
+acf(sl, main='Mean Sea Level Autocorrelation')
+pacf(sl, main='Mean Sea Level Partial Autocorrelation')
+```
+
+### (b) Model with Trend, Seasonal and Cyclical components
+
+We estimated models with different components to ultimately build a model that appropriately fits the data. We begin with the trend (linear or otherwise). After that we move onto seasonality, and ultimately cycles.
+
+#### Linear Trend
+
+```{r, echo=FALSE}
+fit1 <- lm(sl~t) 
+summary(fit1)
+```
+
+The linear model had two statistically significant coefficients at the 99% confidence interval. Next, we attempted to fit a quadratic trend.
+
+#### Quadratic Trend
+
+```{r, echo=FALSE, fig.height=5}
+fit2 <- lm(sl~t + I(t^2)) 
+summary(fit2) 
+```
+
+The quadratic model had no statistically significant coefficients. As a result, it is apparent that the linear trend is a more appropriate fit for this data.
+
+--
+
+#### Trend + Seasonality
+
+```{r, echo=FALSE}
+m1 <- tslm(sl ~ t + season)
+summary(m1)
+```
+
+Next, we fit a model consisting of both, trend and seasonality. A summary of this model indicates that 7 of the 12 seasonal components were statistically significant at the 99% confidence interval level. This means that the data in our time series fluctuates significantly during certain seasons, implying that seasonality plays a big role in the underlying process driving this time series. 
+
+To understand the effect of including seasonality in the model, we examined the resduals of this updated model. The residuals provide information regarding any other dynamics that we may have not covered so far.
+
+```{r, fig.height=4.5, fig.length=5, echo=FALSE}
+tsdisplay(m1$residuals, main='Trend + Seasonal Model Residuals') 
+```
+
+Our seasonal model represented a significant improvement over the linear model (evident in its greater s^2). However, there are clearly cyclical dynamics present in the residuals of this model. The ACF and PACF of the residuals of this model suggest that there still may be autoregressive processes driving the data. We determined that either an AR(3) or AR(5) model would capture these dynamics. Additionally, we included an S-AR(2) component in this new model, choosing p=2 because that is the value chosen by R's 'auto.arima' function.
+
+```{r, echo=FALSE}
+tsc1 <- arima(sl, order = c(3,0,0),seasonal=list(order=c(2,0,0)),xreg=t) 
+tsc2 <- arima(sl, order = c(5,0,0),seasonal=list(order=c(2,0,0)),xreg=t) 
+
+summary(tsc1)
+summary(tsc2)
+BIC(tsc1)
+BIC(tsc2) # AIC says tsc2 is best, s2 and BIC says tsc1
+
+model <- tsc1
+```
+
+We tested both of these models with seasonal AR(2) components. Comparing the AIC and BIC of these two models, we found that an AR(3), Seasonal AR(2) model would be the best fit. The amplitude of the residuals of this model was smaller than that without the seasonal AR components. 
+
+### (c) Residuals vs. Fitted Values
+
+```{r, fig.height=4.4, echo=FALSE}
+plot(fitted(model), model$residuals, col='skyblue', main='Model: Trend + Seasons + Cycles', xlab='Fitted Values',ylab='Residuals')  
+```
+
+The residuals of our model do not indicate any clear pattern. All of the residuals lie within the range of -0.4 to 0.4, with a majority of them concentrated within the range of -0.2 to 0.2. This is a good indication of the fit of the model. There seem to be no structural breaks in the data as the residuals are quite uniformly spread out within the ranges mentioned above. 
+
+### (d) Autocorrelation and Partial Autocorrelation Plots
+
+#### Testing for White Noise
+```{r, echo=FALSE}
+Box.test(model$residuals, type = "Ljung-Box")
+Box.test(model$residuals, type = "Box-Pierce") # NOT white noise
+```
+
+The ACF and PACF of the residuals of our model did not perfectly resemble a white noise process. This is confirmed by the results of the Ljung-Box and Box-Pierce tests for white noise processes.
+However, the residuals were still significantly small. This created a doubt as to whether we had captured all of the underlying dynamics. To test this, we applied an auto arima function. Its output provides R's estimation of a model that best fits the data chosen. We compared the residuals of such a model with that of the model we had thus far estimated. The purpose was to check the accuracy of the model at this point.
+
+#### Comparing Best Fit Model to Auto Arima
+```{r, echo=FALSE, fig.height=4.5}
+tsdisplay(model$residuals,lag.max=1000, main='Our Model')
+tsdisplay(auto.arima(sl)$residuals,lag.max=1000,main='Auto-ARIMA') # auto.arima has similar dynamics
+```
+
+We found that the ACF and PACF of the best fit model according to R were very similar to those of our model. Thus we are confident that we have captured all the underlying dynamics in the chosen time series. 
+
+### (e) Cumulative Sum Plot
+```{r, echo=FALSE, fig.height=4}
+plot(efp(model$res~1, type = "Rec-CUSUM"),main='Model: Recursive CUSUM Test')
+```
+
+It appears that the model is structurally sound. Everything in the plot lies within the 2 red lines. This means that the underlying engine that drives this time series has not changed. It also means that any structural breaks we may observe our not statistically significant. 
+
+### (f) Recursive Residuals
+```{r, echo=FALSE, fig.height=4}
+y= recresid(model$residuals~1)
+plot(y, pch=16, ylab="Recursive Residuals", main='Model: Recursive Residuals')
+```
+
+The recursive residuals are uniformly spread out. They are not particularly large or small within any given time period. This means that the model is able to fit to the data with practically the same level of accuracy throughout the length of the series.
+
+### (g) Diagnostic Statistics
+```{r, echo=FALSE}
+accuracy(model)
+```
+
+Mean Error: -0.0007379456
+Root Mean Squared Error: 0.141437
+Mean Annual Error: 0.1106599
+ 
+The ME and RMSE of our model are both relatively small. This is a good indication as it validates the accuracy of our model. 
+
+
+### (h) 12-Step Ahead Forecast
+
+```{r, echo=FALSE}
+t.sl <- ts(sl[1:684],1959,2015,frequency = 12)
+t.co2 <- ts(co2[1:684],1959,2015,frequency=12)
+t.tmp <- ts(tmp[1:684],1959,2015,frequency=12)
+t.t <- ts(t[1:684],1959,2015,frequency=12)
+
+t.model <- arima(t.sl, order = c(3,1,0),seasonal=list(order=c(2,0,0))) # need to learn how to implement seasons
+h <- df$sl[685:696]
+
+
+fcast <- forecast(t.model,h=12)
+fcast <- fcast[[4]]
+tsc.err <- h - fcast
+
+plot(forecast(t.model,h=12))
+```
+
+### (i) VAR Model
+
+Next, we appropriated a VAR model. The primary purpose of this was to prove causality between sea levels and temperature.
+
+```{r, echo=FALSE}
+ccf(sl, tmp, main='Cross-Correlation: Sea Levels and Temperature') # regular seasonal patterns - very gradual decay 
+
+v1 = VAR(var.df,p=3)
+summary(v1)
+```
+
+```{r, fig.height=8,fig.width=8, echo=FALSE}
+par(mfrow = c(2,1))
+plot(v1)
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(2,1))
+acf(residuals(v1)[,1],main='y=Temperature')
+pacf(residuals(v1)[,1])
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(2,1))
+acf(residuals(v1)[,2],main='y=Sea Level')
+pacf(residuals(v1)[,2])
+```
+
+```{r, echo=FALSE}
+tsdisplay(residuals(v1)[,2],main ="sea levels = temperature(t-k) + sea levels(t-k)")
+```
+
+
+We fit a VAR model of order = 3 using the two variables, sea level and temperature. The summary of the model provides the following information:
+
+Sea Level is dependent on temperature at lag = 1 at the 99% confidence level
+Sea level is dependent on temperature at lag = 3 at the 90% confidence level
+Sea level is dependent on itself at lag = 1 and 3 at the 99% confidence level.
+ 
+Strangely enough, the model suggests stronger causality in the opposite direction. However, intuitively we know that this cannot be the case. (Temperature causes sea level rise and not the other way round.)
+ 
+Examining the ACF and PACF plots of the VAR model with sea level as the dependent variable, we see that they do not resemble the ACF and PACF plots synonymous with white noise. This means that the VAR model of order = 3 does not entirely capture all of the underlying dynamics within the series. It suggests that the model can be improved further, perhaps by including seasonal components. 
+
+### (j) Impulse Response Functions
+
+The plot of the Impulse Response Function shows that an increase in temperature causes a change in the sea level. While these changes may be of an extremely small size, they do still occur. The graph shows that a 1 unit increase in temperature will lead to a less than 1 unit increase in the sea level. It will then fall slightly below the original level before it rises back up again. It will ultimately stabilize around its original value roughly 3 years after the initial impulse. 
+ 
+
+```{r, tidy=TRUE, echo=FALSE}
+#irf(v1)
+plot(irf(v1, n.ahead=36))
+```
+
+```{r, echo=FALSE}
+var.predict = predict(object=v1, n.ahead=52)
+plot(var.predict)
+```
+
+### (k) Granger-Causality
+```{r, echo=FALSE}
+grangertest(sl ~ tmp, order = 3)
+grangertest(tmp ~ sl, order = 3)
+```
+ 
+The Granger causality test reveals that temperature Granger causes sea level. Surprisingly, the opposite is also true. This seems slightly counter-intuitive and suggests that the two are part of a negative feedback loop. However, we must keep in mind that sea level and temperature are just two variables in the global climate system. Each of these is likely affected by several other variables that determine their values and general trend. In order to get a more accurate understanding of causality these variables need to be examined in a far wider context.
+
+### (l) VAR Forecast
+
+```{r, echo=FALSE}
+training<- dim(var.df)[1]-12
+t.vdf <- var.df[1:training,]
+
+v1 = VAR(var.df,p=3)
+
+var.predict = predict(object=v1, n.ahead=12)
+plot(var.predict)
+
+v.fcast <- predict(object=v1, n.ahead=12)
+sl.fcast <- v.fcast[[1]][2]
+sl.fcast <- sl.fcast[[1]][1:12]
+
+v.err <- df$sl[685:696]
+v.err <- v.err - sl.fcast
+
+mean(sum(tsc.err^2)) # ARIMA error (MSE)
+
+mean(sum(v.err^2)) #VAR error (MSE)
+```
+
+We can see from the plots of these models' forecasts that they are predicting almost opposite trends over the course of the next year. It comes as no surprise that the ARIMA model is continuing the recent trend of the data because the AR(3) component introduces considerable persistence. Based on the mean squared errors of these forecasts (compared to observed data), the ARIMA model is a superior forecasting tool.
+
+# III: Conclusions
+
+After encountering dual Granger-Causality, our most important conclusion is that it is exceedingly difficult to reduce climactic phenomena to two variables. If we wish to further study climactic causality we must include more variables and study them in the context of the global (or a local) climatic ecosystem.
+
+Breakng down the chosen time series step-by-step revealed a lot about the underlying processes that drive it. We were pleased with our ability  decompose the timeseries and successfully capture trend, seasonality and cyclical dynamics. Though the VAR analysis was somewhat underwhelming, dual Granger-causality is more gratifying than none.  
+
+This concluded our work with meterological data thus far. It has revealed the many difficulties that arise with data analysis in this field. The numerous and continuously changing processes that affect environmental phenomena are difficult to predict in today's world. This was our first attempt at doing so. This project has brought to light certain problems that we must learn to deal with if we are to accurately use data analysis as a tool for implementing environmental policies in the future. 
+
+# IV: References
+### (1) “Divisional Data Select”. National Oceanic and Atmospheric Administration. Www7.ncdc.noaa.gov. Web.
+### (2) "Water Levels - NOAA Tides & Currents". Tidesandcurrents.noaa.gov.  Web. 
+
+# V: Source Code
+```{}
+library(vars)
+library(forecast)
+
+rm(list=ls())
+
+setwd('/Users/ian/Desktop/project2')
+
+# ----------------- Setup -----------------
+df <- read.csv('temp_co2_sl.csv')
+df <- df[1:696,]
+
+# ----------------- Training Data -----------------
+
+var.df <- data.frame(temp=df$temp,sl=df$sl)
+
+sl <- ts(df$sl,1959,2016,frequency = 12)
+co2 <- ts(df$co2,1959,2016,frequency=12)
+tmp <- ts(df$temp,1959,2016,frequency=12)
+t <- ts(df$date,1959,2016,frequency=12)
+
+# ----------------- Trend -----------------
+par(mfrow=c(3,1))
+plot(sl,col='seagreen',type='l', main='Mean Sea Level', ylab='Sea Level (ft)', xlab='Time')
+acf(sl, main='Mean Sea Level Autocorrelation')
+pacf(sl, main='Mean Sea Level Partial Autocorrelation')
+
+fit1 <- lm(sl~t)
+summary(fit1)
+
+fit2 <- lm(sl~t + I(t^2)) # No statistically significant coefficients
+summary(fit2) 
+
+# ----------------- Seasonality -----------------
+m1 <- tslm(sl ~ t + season)
+summary(m1)
+
+# ----------------- Cycles -----------------
+tsdisplay(m1$residuals, main='Trend + Seasonal Model Residuals') # AR(3) / AR(4) / AR(5)
+plot(m1$fitted.values,m1$residuals,col='skyblue',main='Trend + Seasonal Model',xlab='Fitted Values',ylab='Residuals') # no obvious patterns
+
+tsc1 <- arima(sl, order = c(3,0,0),seasonal=list(order=c(2,0,0)),xreg=t) # need to learn how to implement seasons
+tsc2 <- arima(sl, order = c(5,0,0),seasonal=list(order=c(2,0,0)),xreg=t) # need to learn how to implement seasons
+
+summary(tsc1)
+summary(tsc2)
+BIC(tsc1)
+BIC(tsc2) # AIC says tsc2 is best, s2 and BIC says tsc1
+
+model <- tsc1
+
+Box.test(model$residuals, type = "Ljung-Box")
+Box.test(model$residuals, type = "Box-Pierce") # NOT white noise
+
+tsdisplay(model$residuals,lag.max=1000)
+tsdisplay(auto.arima(sl)$residuals,lag.max=1000) # even auto.arima has similar dynamics
+
+# ----------------- Trend + Seasonality + Cycles Evaluation -----------------
+
+# (c) Residuals vs. Fitted Values
+plot(fitted(model), model$residuals, col='skyblue', main='Model: Trend + Seasons + Cycles', xlab='Fitted Values',ylab='Residuals')  
+
+# (d)  Auto and Partial Autocorrelation Plots
+par(mfrow=c(2,1))
+acf(model$residuals, main='Model Residuals Auto Correlation')
+pacf(model$residuals, main='Model Residuals Partial Auto Correlation')
+
+# (e) Cumulative Sum Plot
+plot(efp(model$res~1, type = "Rec-CUSUM"),main='Model: Recursive CUSUM Test')
+
+# (f) Recursive Residuals
+y= recresid(model$residuals~1)
+plot(y, pch=16, ylab="Recursive Residuals", main='Model: Recursive Residuals')
+
+# (g) Diagnostic Statistics
+accuracy(model)
+
+# ----------------- TSC Training Data Eval -----------------
+
+t.sl <- ts(sl[1:684],1959,2015,frequency = 12)
+t.co2 <- ts(co2[1:684],1959,2015,frequency=12)
+t.tmp <- ts(tmp[1:684],1959,2015,frequency=12)
+t.t <- ts(t[1:684],1959,2015,frequency=12)
+
+t.model <- arima(t.sl, order = c(3,1,0),seasonal=list(order=c(2,0,0))) # need to learn how to implement seasons
+h <- df$sl[685:696]
+
+# (h) 12-Step Ahead Forecast
+plot(forecast(t.model,h=12))
+fcast <- forecast(t.model,h=12)
+fcast <- fcast[[4]]
+tsc.err <- h - fcast
+
+# ----------------- VAR fitting -----------------
+#(i) Var Model
+ccf(sl, tmp) # regular seasonal patterns - very gradual decay 
+
+v1 = VAR(var.df,p=3)
+summary(v1)
+
+plot(v1)
+
+par(mfrow=c(2,1))
+acf(residuals(v1)[,1],main='y=Temperature')
+pacf(residuals(v1)[,1])
+
+par(mfrow=c(2,1))
+acf(residuals(v1)[,2],main='y=Sea Level')
+pacf(residuals(v1)[,2])
+
+
+tsdisplay(residuals(v1)[,2],main ="sea levels = temperature(t-k) + sea levels(t-k)")
+
+#(j) Impulse Response Functions
+irf(v1)
+plot(irf(v1, n.ahead=36))
+
+
+#(k) Granger-Causality
+grangertest(sl ~ tmp, order = 4)
+grangertest(tmp ~ sl, order = 4)
+
+#(l) VAR Forecast
+training<- dim(var.df)[1]-12
+t.vdf <- var.df[1:training,]
+
+v1 = VAR(var.df,p=3)
+
+var.predict = predict(object=v1, n.ahead=12)
+plot(var.predict)
+
+v.fcast <- predict(object=v1, n.ahead=12)
+sl.fcast <- v.fcast[[1]][2]
+sl.fcast <- sl.fcast[[1]][1:12]
+
+v.err <- df$sl[685:696]
+v.err <- v.err - sl.fcast
+
+mean(sum(tsc.err^2)) # ARIMA error (MSE)
+
+mean(sum(v.err^2)) #VAR error (MSE)
+```
+
